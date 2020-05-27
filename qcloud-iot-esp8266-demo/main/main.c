@@ -27,7 +27,7 @@
 
 #include "qcloud_iot_export.h"
 #include "qcloud_iot_demo.h"
-#include "qcloud_wifi_config.h"
+// #include "qcloud_wifi_config.h"
 #include "board_ops.h"
 
 
