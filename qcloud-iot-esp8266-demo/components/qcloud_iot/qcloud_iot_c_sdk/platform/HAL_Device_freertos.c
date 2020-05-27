@@ -23,13 +23,13 @@
 #include "utils_param_check.h"
 
 /* product Id  */
-static char sg_product_id[MAX_SIZE_OF_PRODUCT_ID + 1]    = "PRODUCT_ID";
+static char sg_product_id[MAX_SIZE_OF_PRODUCT_ID + 1]    = "U4T808ST5P";
 
 /* device name */
-static char sg_device_name[MAX_SIZE_OF_DEVICE_NAME + 1]  = "YOUR_DEV_NAME";
+static char sg_device_name[MAX_SIZE_OF_DEVICE_NAME + 1]  = "dev001";
 
 /* device secret of PSK device */
-static char sg_device_secret[MAX_SIZE_OF_DEVICE_SECRET + 1] = "YOUR_IOT_PSK";
+static char sg_device_secret[MAX_SIZE_OF_DEVICE_SECRET + 1] = "C4yFeCMqMkjZIbnvvT32Ig==";
 
 #ifdef DEV_DYN_REG_ENABLED
 /* product secret for device dynamic Registration  */

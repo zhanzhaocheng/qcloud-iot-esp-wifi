@@ -120,7 +120,7 @@ static void _on_event_reply_callback(void *pClient, MQTTMessage *message, void *
         // Log_d("no status return");
     }
 
-    Log_d("eventToken:%s code:%d status:%s", client_token, code, status);
+    // Log_d("eventToken:%s code:%d status:%s", client_token, code, status);
 
     if (template_client != NULL)
         _traverse_event_list(template_client, template_client->inner_data.event_list, client_token, message, eDEAL_REPLY_CB);

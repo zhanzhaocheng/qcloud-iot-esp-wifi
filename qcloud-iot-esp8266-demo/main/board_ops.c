@@ -12,16 +12,13 @@
  *
  */
 
-
 #include "driver/gpio.h"
-#include "esp8266/pin_mux_register.h"
+// #include "esp8266/pin_mux_register.h"
 
 #include "board_ops.h"
 
-
 uint32_t g_wifi_led_gpio = GPIO_WIFI_LED;
 uint32_t g_relay_led_gpio = GPIO_RELAY_LED;
-
 
 esp_err_t set_wifi_led_state(uint32_t state)
 {
@@ -32,7 +29,6 @@ esp_err_t set_relay_led_state(uint32_t state)
 {
     return gpio_set_level(g_relay_led_gpio, state);
 }
-
 
 void board_init(void)
 {
@@ -52,6 +48,10 @@ void board_init(void)
 
     set_wifi_led_state(WIFI_LED_OFF);
     set_relay_led_state(RELAY_LED_OFF);
+
+    ioconfig.pin_bit_mask = (1ULL << 12) | (1ULL << 13) | (1ULL << 14) ;
+    ioconfig.intr_type = GPIO_INTR_DISABLE;
+    ioconfig.mode = GPIO_MODE_OUTPUT;
+    ioconfig.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&ioconfig);
 }
-
-

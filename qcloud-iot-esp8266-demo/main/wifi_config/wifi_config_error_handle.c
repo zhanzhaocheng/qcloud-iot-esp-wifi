@@ -22,7 +22,7 @@
 #include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "cJSON.h"
-#include "spi_flash.h"
+#include "esp_spi_flash.h"
 
 #include "qcloud_iot_export_log.h"
 #include "qcloud_iot_import.h"
