@@ -22,7 +22,6 @@
 #include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "cJSON.h"
-#include "esp_spi_flash.h"
 
 #include "qcloud_iot_export_log.h"
 #include "qcloud_iot_import.h"
@@ -32,6 +31,7 @@
 /************** WiFi config error msg collect and post feature ******************/
 
 #ifdef WIFI_ERR_LOG_POST
+#include "esp_spi_flash.h"
 
 static const char *g_err_log[] = {
     "Everything OK!",               /* SUCCESS_TYPE = 0,*/
@@ -171,13 +171,7 @@ int handle_saved_error_log(void)
 
     size_t log_size = log_cnt * sizeof(err_log_t);
     err_log_t *log_src = (err_log_t *)HAL_Malloc(log_size);
-    if (log_src == NULL) {
-        Log_e("malloc failed");
-        return -1;
-    }
-
     if (load_err_log(log_src, log_size)) {
-        HAL_Free(log_src);
         Log_e("load error log failed");
         return -1;
     }
@@ -195,13 +189,11 @@ int handle_saved_error_log(void)
         int ret = xQueueGenericSend(g_err_log_queue, &log_src[i], 0, queueSEND_TO_BACK);
         if (ret != pdPASS) {
             Log_e("xQueueGenericSend failed: %d", ret);
-            HAL_Free(log_src);
             return ERR_OS_QUEUE;
         }
         i++;
     } while (i < log_cnt);
 
-    HAL_Free(log_src);
     return 0;
 }
 
@@ -229,6 +221,8 @@ int init_error_log_queue(void)
 
 int push_error_log(uint16_t err_id, int32_t err_sub_id)
 {
+    Log_e("error happen, err_id: %u err_sub_id: %d");
+
     sg_error_happen = true;
 
 #ifdef WIFI_ERR_LOG_POST
@@ -248,8 +242,6 @@ int push_error_log(uint16_t err_id, int32_t err_sub_id)
         Log_e("xQueueGenericSend failed: %d", ret);
         return ERR_OS_QUEUE;
     }
-#else
-    Log_e("error happen, err_id: %u err_sub_id: %d", err_id, err_sub_id);
 #endif
     return 0;
 }
@@ -350,11 +342,9 @@ int save_error_log(void)
     log_src->log_cnt = j;
     log_size = 2 * sizeof(uint32_t) + log_src->log_cnt * sizeof(err_log_t);
     if (save_err_log(log_src, log_size)) {
-        HAL_Free(log_src);
         Log_e("save error log to flash failed");
         return -1;
     }
-    HAL_Free(log_src);
 #endif
     return 0;
 }

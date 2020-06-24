@@ -40,12 +40,11 @@ static bool sg_comm_task_run = false;
 
 /* wifi config state flag */
 static bool sg_wifi_config_success = false;
-static bool sg_token_received = false;
-
+static bool sg_token_received = true;
 //============================ MQTT communication functions begin ===========================//
 
 #define MAX_TOKEN_LENGTH  32
-static char sg_token_str[MAX_TOKEN_LENGTH + 4] = {0};
+char sg_token_str[MAX_TOKEN_LENGTH + 4] = {0};
 
 typedef struct TokenHandleData {
     bool sub_ready;
@@ -289,7 +288,7 @@ int get_reg_dev_info(DeviceInfo *dev_info)
     if (!strncmp(dev_info->device_secret, "YOUR_IOT_PSK", MAX_SIZE_OF_DEVICE_SECRET)
         && strncmp(dev_info->product_secret, "YOUR_PRODUCT_SECRET", MAX_SIZE_OF_PRODUCT_SECRET)) {
 
-        ret = qcloud_iot_dyn_reg_dev(dev_info);
+        ret = IOT_DynReg_Device(dev_info);
         if (ret) {
             Log_e("dynamic register device failed: %d", ret);
             return ret;
@@ -390,8 +389,7 @@ int mqtt_send_token(void)
 
     // sleep 5 seconds to avoid frequent MQTT connection
     if (ret == 0)
-        HAL_SleepMs(5000);
-
+    HAL_SleepMs(5000);
     return ret;
 }
 //============================ MQTT communication functions end ===========================//

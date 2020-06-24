@@ -52,75 +52,94 @@ bool is_wifi_sta_connected(void)
     return sg_wifi_sta_connected;
 }
 
-static esp_err_t _wifi_event_handler(void* ctx, system_event_t* event)
+
+static void _wifi_event_handler(void* arg, esp_event_base_t event_base, 
+                                int32_t event_id, void* event_data)
 {
-    if (event == NULL) {
-        return ESP_OK;
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+        Log_i("WIFI_EVENT_AP_STACONNECTED, STA:" MACSTR " join, AID=%d", MAC2STR(event->mac), event->aid);
+        
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        xEventGroupSetBits(sg_wifi_event_group, APSTA_DISCONNECTED_BIT);
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+        
+        Log_i("WIFI_EVENT_AP_STADISCONNECTED, STA:" MACSTR " leave, AID=%d", MAC2STR(event->mac), event->aid);
+        
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        Log_i("SYSTEM_EVENT_STA_START");
+        
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        
+        wifi_event_sta_connected_t* event = (wifi_event_sta_connected_t *)event_data;
+        char ssid[33] = {0};
+        memcpy(ssid, event->ssid, 32);
+        Log_e("WIFI_EVENT_STA_CONNECTED with AP: %s in channel %u", ssid, event->channel);
+        xEventGroupClearBits(sg_wifi_event_group, CONNECTED_BIT);
+        sg_wifi_sta_connected = false;
+        
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        
+        wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t *)event_data;
+        char ssid[33] = {0};
+        memcpy(ssid, event->ssid, 32);
+        Log_e("WIFI_EVENT_STA_DISCONNECTED with AP: %s", ssid);
+        xEventGroupClearBits(sg_wifi_event_group, CONNECTED_BIT);
+        sg_wifi_sta_connected = false;
+        
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;        
+        Log_i("STA Got IPv4[%s]", ip4addr_ntoa(&event->ip_info.ip));
+
+        xEventGroupSetBits(sg_wifi_event_group, CONNECTED_BIT);
+        sg_wifi_sta_connected = true;
+        
+    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SCAN_DONE) {
+        Log_i("Scan done");
+    } else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL) {
+        Log_i("Found channel");
+    } else if (event_base == SC_EVENT && event_id == SC_EVENT_GOT_SSID_PSWD) {
+
+        smartconfig_event_got_ssid_pswd_t *evt = (smartconfig_event_got_ssid_pswd_t *)event_data;
+        wifi_config_t wifi_config;
+        uint8_t ssid[33] = { 0 };
+        uint8_t password[65] = { 0 };
+        memcpy(ssid, evt->ssid, sizeof(evt->ssid));
+        memcpy(password, evt->password, sizeof(evt->password));
+        Log_i( "SC_EVENT_GOT_SSID_PSWD SSID:%s PSD: %s", ssid, password);
+        
+        bzero(&wifi_config, sizeof(wifi_config_t));
+        memcpy(wifi_config.sta.ssid, evt->ssid, sizeof(wifi_config.sta.ssid));
+        memcpy(wifi_config.sta.password, evt->password, sizeof(wifi_config.sta.password));
+        wifi_config.sta.bssid_set = evt->bssid_set;
+        if (wifi_config.sta.bssid_set == true) {
+            memcpy(wifi_config.sta.bssid, evt->bssid, sizeof(wifi_config.sta.bssid));
+        }
+
+        int ret = esp_wifi_disconnect();
+        if ( ESP_OK != ret ) {
+            Log_e("esp_wifi_disconnect failed: %d", ret);
+            //push_error_log(ERR_WIFI_DISCONNECT, ret);
+        }
+
+        ret = esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+        if ( ESP_OK != ret ) {
+            Log_e("esp_wifi_set_config failed: %d", ret);
+            //push_error_log(ERR_WIFI_CONFIG, ret);
+        }
+
+        ret = esp_wifi_connect();
+        if ( ESP_OK != ret ) {
+            Log_e("esp_wifi_connect failed: %d", ret);
+            push_error_log(ERR_WIFI_CONNECT, ret);
+        }
+    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE) {
+        Log_w( "SC_EVENT_SEND_ACK_DONE");
+        xEventGroupSetBits(sg_wifi_event_group, ESPTOUCH_DONE_BIT);
     }
-
-    switch (event->event_id) {
-        case SYSTEM_EVENT_STA_START:
-            Log_i("SYSTEM_EVENT_STA_START");
-            break;
-
-        case SYSTEM_EVENT_STA_CONNECTED:
-            Log_i("SYSTEM_EVENT_STA_CONNECTED to AP %s at channel %u",
-                  (char *)event->event_info.connected.ssid, event->event_info.connected.channel);
-            break;
-
-        case SYSTEM_EVENT_STA_GOT_IP:
-            Log_i("STA Got IPv4[%s]", ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
-
-            xEventGroupSetBits(sg_wifi_event_group, CONNECTED_BIT);
-            sg_wifi_sta_connected = true;
-            break;
-
-        case SYSTEM_EVENT_STA_DISCONNECTED:
-            Log_e("SYSTEM_EVENT_STA_DISCONNECTED from AP %s reason: %u",
-                  (char *)event->event_info.disconnected.ssid, event->event_info.disconnected.reason);
-            xEventGroupClearBits(sg_wifi_event_group, CONNECTED_BIT);
-            sg_wifi_sta_connected = false;
-            //push_error_log(ERR_WIFI_CONNECT, event->event_info.disconnected.reason);
-            break;
-
-        case SYSTEM_EVENT_AP_START: {
-            uint8_t channel = 0;
-            wifi_second_chan_t second;
-            esp_wifi_get_channel(&channel, &second);
-            Log_i("SYSTEM_EVENT_AP_START at channel %u", channel);
-            break;
-        }
-
-        case SYSTEM_EVENT_AP_STOP:
-            Log_i("SYSTEM_EVENT_AP_STOP");
-            break;
-
-        case SYSTEM_EVENT_AP_STACONNECTED: {
-            system_event_ap_staconnected_t *staconnected = &event->event_info.sta_connected;
-            Log_i("SYSTEM_EVENT_AP_STACONNECTED, mac:" MACSTR ", aid:%d", \
-                  MAC2STR(staconnected->mac), staconnected->aid);
-            break;
-        }
-
-        case SYSTEM_EVENT_AP_STADISCONNECTED: {
-            xEventGroupSetBits(sg_wifi_event_group, APSTA_DISCONNECTED_BIT);
-            system_event_ap_stadisconnected_t *stadisconnected = &event->event_info.sta_disconnected;
-            Log_i("SYSTEM_EVENT_AP_STADISCONNECTED, mac:" MACSTR ", aid:%d", \
-                  MAC2STR(stadisconnected->mac), stadisconnected->aid);
-            break;
-        }
-
-        case SYSTEM_EVENT_AP_STAIPASSIGNED:
-            Log_i("SYSTEM_EVENT_AP_STAIPASSIGNED");
-            break;
-
-        default:
-            Log_i("unknown event id: %d", event->event_id);
-            break;
-    }
-
-    return ESP_OK;
 }
+
 
 int wifi_ap_init(const char *ssid, const char *psw, uint8_t ch)
 {
@@ -133,6 +152,12 @@ int wifi_ap_init(const char *ssid, const char *psw, uint8_t ch)
             return ESP_ERR_NO_MEM;
         }
 
+        rc = esp_event_loop_create_default();
+        if (rc != ESP_OK) {
+            Log_e("esp_event_loop_create_default failed: %d", rc);
+            return rc;
+        }
+        
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         rc = esp_wifi_init(&cfg);
         if (rc != ESP_OK) {
@@ -157,11 +182,18 @@ int wifi_ap_init(const char *ssid, const char *psw, uint8_t ch)
         Log_w("esp_wifi_stop failed: %d", rc);
     }
 
-    if (esp_event_loop_init(_wifi_event_handler, NULL) && g_cb_bck == NULL) {
-        Log_w("replace esp wifi event handler");
-        g_cb_bck = esp_event_loop_set_cb(_wifi_event_handler, NULL);
+    rc = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &_wifi_event_handler, NULL);
+    if (rc != ESP_OK) {
+        Log_e("esp_event_handler_register WIFI_EVENT failed: %d", rc);
+        return rc;
     }
-
+    
+    rc = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &_wifi_event_handler, NULL);
+    if (rc != ESP_OK) {
+        Log_e("esp_event_handler_register IP_EVENT failed: %d", rc);
+        return rc;
+    }
+    
     rc = esp_wifi_set_storage(WIFI_STORAGE_RAM);
     if (rc != ESP_OK) {
         Log_e("esp_wifi_set_storage failed: %d", rc);
@@ -283,59 +315,6 @@ int wifi_stop_softap(void)
     return 0;
 }
 
-static void _smartconfig_event_cb(smartconfig_status_t status, void *pdata)
-{
-    switch (status) {
-        case SC_STATUS_WAIT:
-            Log_i("SC_STATUS_WAIT");
-            break;
-        case SC_STATUS_FIND_CHANNEL:
-            Log_i("SC_STATUS_FINDING_CHANNEL");
-            break;
-        case SC_STATUS_GETTING_SSID_PSWD:
-            Log_i("SC_STATUS_GETTING_SSID_PSWD");
-            break;
-        case SC_STATUS_LINK:
-            if (pdata) {
-                wifi_config_t *wifi_config = pdata;
-                Log_i( "SC_STATUS_LINK SSID:%s PSD: %s", wifi_config->sta.ssid, wifi_config->sta.password);
-
-                int ret = esp_wifi_disconnect();
-                if ( ESP_OK != ret ) {
-                    Log_e("esp_wifi_disconnect failed: %d", ret);
-                    //push_error_log(ERR_WIFI_DISCONNECT, ret);
-                }
-
-                ret = esp_wifi_set_config(ESP_IF_WIFI_STA, wifi_config);
-                if ( ESP_OK != ret ) {
-                    Log_e("esp_wifi_set_config failed: %d", ret);
-                    //push_error_log(ERR_WIFI_CONFIG, ret);
-                }
-
-                ret = esp_wifi_connect();
-                if ( ESP_OK != ret ) {
-                    Log_e("esp_wifi_connect failed: %d", ret);
-                    push_error_log(ERR_WIFI_CONNECT, ret);
-                }
-            } else {
-                Log_e("invalid smart config link data");
-                push_error_log(ERR_SC_DATA, ERR_SC_INVALID_DATA);
-            }
-            break;
-        case SC_STATUS_LINK_OVER:
-            Log_w( "SC_STATUS_LINK_OVER");
-            if (pdata != NULL) {
-                uint8_t phone_ip[4] = { 0 };
-                memcpy(phone_ip, (uint8_t* )pdata, 4);
-                Log_i( "Phone ip: %d.%d.%d.%d\n", phone_ip[0], phone_ip[1], phone_ip[2], phone_ip[3]);
-            }
-
-            xEventGroupSetBits(sg_wifi_event_group, ESPTOUCH_DONE_BIT);
-            break;
-        default:
-            break;
-    }
-}
 
 int wifi_sta_init(void)
 {
@@ -348,6 +327,12 @@ int wifi_sta_init(void)
             return ESP_ERR_NO_MEM;
         }
 
+        rc = esp_event_loop_create_default();
+        if (rc != ESP_OK) {
+            Log_e("esp_event_loop_create_default failed: %d", rc);
+            return rc;
+        }
+        
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         rc = esp_wifi_init(&cfg);
         if (rc != ESP_OK) {
@@ -366,11 +351,24 @@ int wifi_sta_init(void)
         Log_w("esp_wifi_stop failed: %d", rc);
     }
 
-    if (esp_event_loop_init(_wifi_event_handler, NULL) && g_cb_bck == NULL) {
-        Log_w("replace esp wifi event handler");
-        g_cb_bck = esp_event_loop_set_cb(_wifi_event_handler, NULL);
+    rc = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &_wifi_event_handler, NULL);
+    if (rc != ESP_OK) {
+        Log_e("esp_event_handler_register WIFI_EVENT failed: %d", rc);
+        return rc;
     }
+    
+    rc = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &_wifi_event_handler, NULL);
+    if (rc != ESP_OK) {
+        Log_e("esp_event_handler_register IP_EVENT failed: %d", rc);
+        return rc;
+    }    
 
+    rc = esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &_wifi_event_handler, NULL);
+    if (rc != ESP_OK) {
+        Log_e("esp_event_handler_register SC_EVENT failed: %d", rc);
+        return rc;
+    }
+    
     rc = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
     if (rc != ESP_OK) {
         Log_e("esp_wifi_set_storage failed: %d", rc);
@@ -394,7 +392,8 @@ int wifi_start_smartconfig(void)
         return ret;
     }
 
-    ret = esp_smartconfig_start(_smartconfig_event_cb);
+    smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
+    ret = esp_smartconfig_start(&cfg);
     if ( ESP_OK != ret ) {
         Log_e("esp_smartconfig_start failed: %d", ret);
         return ret;

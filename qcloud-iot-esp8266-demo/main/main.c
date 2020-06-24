@@ -29,6 +29,7 @@
 #include "qcloud_iot_demo.h"
 // #include "qcloud_wifi_config.h"
 #include "board_ops.h"
+#include "light_driver.h"
 
 
 /* normal WiFi STA mode init and connection ops */
@@ -41,6 +42,7 @@
 
 static const int CONNECTED_BIT = BIT0;
 static EventGroupHandle_t wifi_event_group;
+static const char *TAG = "main";
 
 bool wait_for_wifi_ready(int event_bits, uint32_t wait_cnt, uint32_t BlinkTime)
 {
@@ -68,20 +70,20 @@ bool wait_for_wifi_ready(int event_bits, uint32_t wait_cnt, uint32_t BlinkTime)
 
 static void wifi_connection(void)
 {
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = TEST_WIFI_SSID,
-            .password = TEST_WIFI_PASSWORD,
-        },
-    };
-    Log_i("Setting WiFi configuration SSID %s...", wifi_config.sta.ssid);
+    // wifi_config_t wifi_config = {
+    //     .sta = {
+    //         .ssid = TEST_WIFI_SSID,
+    //         .password = TEST_WIFI_PASSWORD,
+    //     },
+    // };
+    // Log_i("Setting WiFi configuration SSID %s...", wifi_config.sta.ssid);
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+    // ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
 
     esp_wifi_connect();
 }
 
-static esp_err_t _esp_event_handler(void* ctx, system_event_t* event)
+static esp_err_t _esp_event_handler(void *ctx, system_event_t *event)
 {
     Log_i("event = %d", event->event_id);
 
@@ -112,7 +114,11 @@ static esp_err_t _esp_event_handler(void* ctx, system_event_t* event)
 
 static void esp_wifi_initialise(void)
 {
-    tcpip_adapter_init();
+    // tcpip_adapter_init();
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
 
     wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_event_loop_init(_esp_event_handler, NULL));
@@ -121,12 +127,12 @@ static void esp_wifi_initialise(void)
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // ESP_ERROR_CHECK(esp_wifi_start());
 }
 
 #endif //#ifnef CONFIG_DEMO_WIFI_BOARDING
 
-void setup_sntp(void )
+void setup_sntp(void)
 {
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
 
@@ -157,31 +163,77 @@ void setup_sntp(void )
     tzset();
 }
 
-void qcloud_demo_task(void* parm)
+void qcloud_demo_task(void *parm)
 {
     bool wifi_connected = false;
     Log_i("qcloud_demo_task start");
 
 #if CONFIG_WIFI_CONFIG_ENABLED
-    /* to use WiFi config and device binding with Wechat mini program */
+    /* to use WiFi config and device binding ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));with Wechat mini program */
     //int ret = start_softAP("ESP8266-SAP", "12345678", 0);
     int ret = start_smartconfig();
+
     if (ret) {
         Log_e("start wifi config failed: %d", ret);
     } else {
         /* max waiting: 150 * 2000ms */
         int wait_cnt = 150;
+
         do {
             Log_d("waiting for wifi config result...");
             HAL_SleepMs(2000);
             wifi_connected = is_wifi_config_successful();
         } while (!wifi_connected && wait_cnt--);
     }
+
 #else
     /* init wifi STA and start connection with expected BSS */
     esp_wifi_initialise();
+
+    wifi_config_t wifi_config = {0};
+
+    if (mdf_info_load("wifi_config", &wifi_config, sizeof(wifi_config_t)) != MDF_OK) {
+        extern void prov_softap_get_config(char *ssid, char *password);
+        prov_softap_get_config((char *)wifi_config.sta.ssid, (char *)wifi_config.sta.password);
+        Log_i("Setting WiFi configuration SSID %s...", wifi_config.sta.ssid);
+        ESP_ERROR_CHECK(esp_wifi_stop());
+
+        mdf_info_save("wifi_config", &wifi_config, sizeof(wifi_config_t));
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    ESP_ERROR_CHECK(esp_wifi_start());
+    // wifi_connection();
+
     /* 20 * 1000ms */
     wifi_connected = wait_for_wifi_ready(CONNECTED_BIT, 20, 1000);
+
+    if (mdf_info_load("wifi_config", &wifi_config, sizeof(wifi_config_t)) != MDF_OK) {
+        int mqtt_send_token(void);
+        mqtt_send_token();
+
+
+        int opt_val = 1;
+        int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &opt_val, sizeof(int));
+        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(int));
+
+        struct sockaddr_in broadcast_addr = {
+            .sin_family      = AF_INET,
+            .sin_port        = htons(1025),
+            .sin_addr.s_addr = htonl(INADDR_BROADCAST),
+        };
+
+        const char *broadcast_msg_buf = "Client publish token ok";
+
+        for (size_t i = 0; i < 10; i++) {
+            sendto(sockfd, broadcast_msg_buf, strlen(broadcast_msg_buf), 0,
+                         (struct sockaddr *)&broadcast_addr, sizeof(struct sockaddr));
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+
 #endif
 
     if (wifi_connected) {
@@ -205,8 +257,20 @@ void qcloud_demo_task(void* parm)
 void app_main()
 {
     int stack_size;
+    light_driver_config_t driver_config = {
+        .gpio_red        = 4,
+        .gpio_green      = 16,
+        .gpio_blue       = 5,
+        .gpio_cold       = 23,
+        .gpio_warm       = 19,
+        .fade_period_ms  = 500,
+        .blink_period_ms = 2000,
+    };
 
     ESP_ERROR_CHECK(nvs_flash_init());
+
+    MDF_ERROR_ASSERT(light_driver_init(&driver_config));
+    light_driver_set_switch(true);
 
     //init log level
     IOT_Log_Set_Level(eLOG_DEBUG);
